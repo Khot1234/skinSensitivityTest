@@ -13,10 +13,12 @@ CORS(app)
 
 # App/config
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
 ALLOWED_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp'}
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-me')
+
+# Vercel Blob Storage configuration
+BLOB_STORE_TOKEN = os.environ.get('BLOB_STORE_TOKEN')
+VERCEL_BLOB_API = "https://blob.vercel-storage.com"
 
 # MongoDB configuration
 MONGO_URI = os.environ.get('MONGODB_URI', 'mongodb://localhost:27017/skin_sensitivity')
@@ -99,8 +101,8 @@ def allowed_file(filename: str) -> bool:
     _, ext = os.path.splitext(filename.lower())
     return ext in ALLOWED_EXTENSIONS
 
-def analyze_image_file(path: str):
-    with Image.open(path) as img:
+def analyze_image_file(file):
+    with Image.open(file) as img:
         img = img.convert('RGB')
         img_small = img.resize((256, 256))
         stat = ImageStat.Stat(img_small)
@@ -153,13 +155,49 @@ def analyze_image():
         return jsonify({'error': 'No selected file'}), 400
     if not allowed_file(file.filename):
         return jsonify({'error': 'Unsupported file type'}), 400
-    filename = datetime.utcnow().strftime('%Y%m%d%H%M%S_') + secure_filename(file.filename)
-    save_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-    file.save(save_path)
 
     try:
-        score, total, level, description, metrics = analyze_image_file(save_path)
+        # First analyze the image from memory
+        score, total, level, description, metrics = analyze_image_file(file)
+
+        # Then upload to Vercel Blob Storage if analysis was successful
+        if not BLOB_STORE_TOKEN:
+            return jsonify({'error': 'Storage configuration missing'}), 500
+
+        import httpx
+        filename = datetime.utcnow().strftime('%Y%m%d%H%M%S_') + secure_filename(file.filename)
+        
+        # Get upload URL from Vercel Blob
+        headers = {'Authorization': f'Bearer {BLOB_STORE_TOKEN}'}
+        response = httpx.post(
+            f"{VERCEL_BLOB_API}/upload",
+            headers=headers,
+            json={
+                'size': len(file.read()),
+                'contentType': file.content_type,
+                'filename': filename
+            }
+        )
+        file.seek(0)  # Reset file pointer after reading
+        
+        if response.status_code != 201:
+            return jsonify({'error': 'Failed to get upload URL'}), 500
+        
+        upload_url = response.json().get('uploadUrl')
+        blob_url = response.json().get('url')
+        
+        # Upload the file to Vercel Blob
+        upload_response = httpx.put(
+            upload_url,
+            content=file.read(),
+            headers={'Content-Type': file.content_type}
+        )
+        
+        if upload_response.status_code != 200:
+            return jsonify({'error': 'Failed to upload image'}), 500
+            
     except Exception as e:
+        app.logger.error(f'Error in image analysis: {str(e)}')
         return jsonify({'error': 'Failed to analyze image', 'details': str(e)}), 500
 
     # Persist result
@@ -201,7 +239,8 @@ def about():
 
 @app.route('/uploads/<path:filename>')
 def uploaded_file(filename):
-    return send_from_directory(UPLOAD_FOLDER, filename)
+    # Redirect to the Vercel Blob URL
+    return redirect(f"{VERCEL_BLOB_API}/{filename}")
 
 @app.route('/results')
 def results_page():
