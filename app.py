@@ -1,68 +1,35 @@
 from flask import Flask, render_template, jsonify, request, send_from_directory, redirect, url_for, session, flash
 from flask_cors import CORS
 import os
-import sqlite3
 from datetime import datetime
 from werkzeug.utils import secure_filename
 from PIL import Image, ImageStat
 from werkzeug.security import generate_password_hash, check_password_hash
+from pymongo import MongoClient
+from bson import ObjectId
 
 app = Flask(__name__)
 CORS(app)
 
 # App/config
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-DB_PATH = os.path.join(BASE_DIR, 'results.db')
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
 ALLOWED_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-me')
 
+# MongoDB configuration
+MONGO_URI = os.environ.get('MONGODB_URI', 'mongodb://localhost:27017/skin_sensitivity')
+mongo_client = MongoClient(MONGO_URI)
+db = mongo_client.get_default_database() if 'mongodb+srv://' in MONGO_URI else mongo_client.skin_sensitivity
+
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
 def init_db():
-    conn = get_db()
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS results (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT,
-            method TEXT NOT NULL,
-            score INTEGER,
-            total INTEGER,
-            level TEXT,
-            description TEXT,
-            image_filename TEXT,
-            created_at TEXT NOT NULL
-        )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT,
-            email TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            created_at TEXT NOT NULL
-        )
-        """
-    )
-    conn.commit()
-    # Migration: add user_id column to results if missing
-    cur = conn.execute("PRAGMA table_info(results)")
-    cols = [r[1] for r in cur.fetchall()]
-    if 'user_id' not in cols:
-        conn.execute("ALTER TABLE results ADD COLUMN user_id INTEGER")
-        conn.commit()
-    conn.close()
-
-init_db()
+    # Create indexes
+    db.users.create_index('email', unique=True)
+    db.results.create_index('user_id')
+    db.results.create_index('created_at')
 
 # Sample skin sensitivity test questions
 SKIN_QUESTIONS = [
@@ -112,24 +79,19 @@ def analyze_skin():
         description = "Your skin is highly sensitive. Consult with a dermatologist for personalized care."
 
     # Persist result
-    conn = get_db()
     user_id = session.get('user', {}).get('id') if session.get('user') else None
-    conn.execute(
-        "INSERT INTO results (name, method, score, total, level, description, image_filename, created_at, user_id) VALUES (?,?,?,?,?,?,?,?,?)",
-        (
-            name,
-            'questionnaire',
-            score,
-            total,
-            level,
-            description,
-            None,
-            datetime.utcnow().isoformat(),
-            user_id
-        )
-    )
-    conn.commit()
-    conn.close()
+    result = {
+        'name': name,
+        'method': 'questionnaire',
+        'score': score,
+        'total': total,
+        'level': level,
+        'description': description,
+        'image_filename': None,
+        'created_at': datetime.utcnow(),
+        'user_id': ObjectId(user_id) if user_id else None
+    }
+    db.results.insert_one(result)
 
     return jsonify({'score': score, 'total': total, 'level': level, 'description': description})
 
@@ -201,48 +163,37 @@ def analyze_image():
         return jsonify({'error': 'Failed to analyze image', 'details': str(e)}), 500
 
     # Persist result
-    conn = get_db()
     user_id = session.get('user', {}).get('id') if session.get('user') else None
-    conn.execute(
-        "INSERT INTO results (name, method, score, total, level, description, image_filename, created_at, user_id) VALUES (?,?,?,?,?,?,?,?,?)",
-        (
-            name,
-            'image',
-            score,
-            total,
-            level,
-            description,
-            filename,
-            datetime.utcnow().isoformat(),
-            user_id
-        )
-    )
-    conn.commit()
-    conn.close()
+    result = {
+        'name': name,
+        'method': 'image',
+        'score': score,
+        'total': total,
+        'level': level,
+        'description': description,
+        'image_filename': filename,
+        'created_at': datetime.utcnow(),
+        'user_id': ObjectId(user_id) if user_id else None
+    }
+    db.results.insert_one(result)
 
     return jsonify({'score': score, 'total': total, 'level': level, 'description': description, 'metrics': metrics, 'image': filename})
 
 @app.route('/api/results')
 def list_results():
-    conn = get_db()
-    rows = conn.execute(
-        "SELECT id, name, method, score, total, level, description, image_filename, created_at FROM results ORDER BY id DESC LIMIT 100"
-    ).fetchall()
-    conn.close()
-    return jsonify({'results': [dict(r) for r in rows]})
+    results = list(db.results.find({}, {'_id': False}).sort('created_at', -1).limit(100))
+    return jsonify({'results': results})
 
 @app.route('/api/my_results')
 def my_results():
     if not session.get('user'):
         return jsonify({'error': 'Unauthorized'}), 401
     user_id = session['user']['id']
-    conn = get_db()
-    rows = conn.execute(
-        "SELECT id, name, method, score, total, level, description, image_filename, created_at FROM results WHERE user_id = ? ORDER BY id DESC LIMIT 100",
-        (user_id,)
-    ).fetchall()
-    conn.close()
-    return jsonify({'results': [dict(r) for r in rows]})
+    results = list(db.results.find(
+        {'user_id': ObjectId(user_id)},
+        {'_id': False}
+    ).sort('created_at', -1).limit(100))
+    return jsonify({'results': results})
 
 @app.route('/about')
 def about():
@@ -260,29 +211,48 @@ def results_page():
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
-        name = request.form.get('name', '').strip()
-        email = request.form.get('email', '').lower().strip()
-        password = request.form.get('password', '')
-        if not email or not password:
-            flash('Email and password are required.', 'error')
-            return redirect(url_for('register'))
-        conn = get_db()
         try:
-            conn.execute(
-                'INSERT INTO users (name, email, password_hash, created_at) VALUES (?,?,?,?)',
-                (name or email.split('@')[0], email, generate_password_hash(password), datetime.utcnow().isoformat())
-            )
-            conn.commit()
-        except sqlite3.IntegrityError:
-            flash('Email already registered.', 'error')
-            conn.close()
+            name = request.form.get('name', '').strip()
+            email = request.form.get('email', '').lower().strip()
+            password = request.form.get('password', '')
+            
+            if not email or not password:
+                flash('Email and password are required.', 'error')
+                return redirect(url_for('register'))
+            
+            # Ensure indexes exist
+            init_db()
+            
+            # Create user document
+            user = {
+                'name': name or email.split('@')[0],
+                'email': email,
+                'password_hash': generate_password_hash(password),
+                'created_at': datetime.utcnow()
+            }
+            
+            try:
+                result = db.users.insert_one(user)
+                # Auto-login and redirect to analyzer (home)
+                user['_id'] = result.inserted_id
+                session['user'] = {
+                    'id': str(result.inserted_id),
+                    'name': user['name'],
+                    'email': user['email']
+                }
+                flash('Registration successful. Welcome!', 'success')
+                return redirect(url_for('home'))
+            except Exception as e:
+                if 'duplicate key' in str(e):
+                    flash('Email already registered.', 'error')
+                else:
+                    app.logger.error(f'Database error during registration: {str(e)}')
+                    flash('An error occurred during registration. Please try again.', 'error')
+                return redirect(url_for('register'))
+        except Exception as e:
+            app.logger.error(f'Registration error: {str(e)}')
+            flash('An error occurred during registration. Please try again.', 'error')
             return redirect(url_for('register'))
-        # Auto-login and redirect to analyzer (home)
-        new_user = {'id': conn.execute('SELECT last_insert_rowid()').fetchone()[0], 'name': name or email.split('@')[0], 'email': email}
-        conn.close()
-        session['user'] = new_user
-        flash('Registration successful. Welcome!', 'success')
-        return redirect(url_for('home'))
     return render_template('register.html', brand="Edwin Kriti Derma Solutions", user=session.get('user'))
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -290,13 +260,18 @@ def login():
     if request.method == 'POST':
         email = request.form.get('email', '').lower().strip()
         password = request.form.get('password', '')
-        conn = get_db()
-        row = conn.execute('SELECT id, name, email, password_hash FROM users WHERE email = ?', (email,)).fetchone()
-        conn.close()
-        if not row or not check_password_hash(row['password_hash'], password):
+        
+        user = db.users.find_one({'email': email})
+        
+        if not user or not check_password_hash(user['password_hash'], password):
             flash('Invalid email or password.', 'error')
             return redirect(url_for('login'))
-        session['user'] = {'id': row['id'], 'name': row['name'], 'email': row['email']}
+            
+        session['user'] = {
+            'id': str(user['_id']),
+            'name': user['name'],
+            'email': user['email']
+        }
         flash('Welcome back!', 'success')
         return redirect(url_for('home'))
     return render_template('login.html', brand="Edwin Kriti Derma Solutions", user=session.get('user'))
@@ -320,6 +295,10 @@ def login_required(view_func):
 @login_required
 def profile():
     return render_template('profile.html', brand="Edwin Kriti Derma Solutions", user=session.get('user'))
+
+# Ensure database is initialized on startup
+with app.app_context():
+    init_db()
 
 if __name__ == '__main__':
     app.run(debug=True)
