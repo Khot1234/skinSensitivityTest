@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: edwin-derma-app
+    env: python
+    region: frankfurt
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --workers 2 --threads 2 --timeout 120
+    autoDeploy: true
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+    # Optional: persistent disk for uploads (remove if not needed)
+    disk:
+      name: uploads
+      mountPath: /opt/render/project/src/uploads
+      sizeGB: 1

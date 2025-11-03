@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Results | Edwin Kriti Derma Solutions</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
+</head>
+<body class="antialiased text-gray-800 dark-ui" style="font-family: 'Poppins', sans-serif;">
+  <div id="transitionOverlay" class="transition-overlay"></div>
+  <header class="bg-white shadow-sm py-4">
+    <div class="container mx-auto px-4">
+      <nav class="flex items-center justify-between">
+        <a href="/" class="flex items-center gap-3 group">
+          <img src="{{ url_for('static', filename='images/logo.svg') }}" alt="Logo" class="h-9 w-9" />
+          <span class="text-xl sm:text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-500 to-purple-600">Edwin Kriti Derma Solutions</span>
+        </a>
+        <ul class="flex items-center gap-6 text-sm font-medium text-gray-600">
+          <li><a class="hover:text-indigo-600" href="/">Home</a></li>
+          <li><a class="hover:text-indigo-600" href="/about">About</a></li>
+          <li><a class="hover:text-indigo-600" href="/results">Results</a></li>
+          {% if user %}
+            <li><a class="hover:text-indigo-600" href="/profile">Profile</a></li>
+            <li><a class="hover:text-indigo-600" href="/logout">Logout</a></li>
+          {% else %}
+            <li><a class="hover:text-indigo-600" href="/login">Login</a></li>
+            <li><a class="hover:text-indigo-600" href="/register">Register</a></li>
+          {% endif %}
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main class="py-12">
+    <div class="container mx-auto px-4 max-w-5xl">
+      <section class="bg-white rounded-xl shadow-lg p-6">
+        <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+          <div>
+            <h1 class="text-2xl font-bold text-gray-800">Results</h1>
+            <p class="text-gray-600 text-sm">Browse recent assessments. Use filters to narrow down.</p>
+          </div>
+          <div class="flex gap-3">
+            <select id="method" class="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+              <option value="">All Methods</option>
+              <option value="questionnaire">Questionnaire</option>
+              <option value="image">Image</option>
+            </select>
+            <input id="search" class="border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Search level/desc" />
+            <button id="refresh" class="btn-primary text-white px-4 py-2 rounded-lg text-sm">Refresh</button>
+          </div>
+        </div>
+
+        <div id="results" class="mt-6 grid sm:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="bg-white border-t border-gray-200 py-6">
+    <div class="container mx-auto px-4 text-center text-gray-500 text-sm">
+      <p>&copy; <script>document.write(new Date().getFullYear())</script> Edwin Kriti Derma Solutions. For educational purposes only.</p>
+    </div>
+  </footer>
+
+  <script>
+    async function loadAllResults() {
+      const res = await fetch('/api/results');
+      return (await res.json()).results || [];
+    }
+    function render(items) {
+      const el = document.getElementById('results');
+      el.innerHTML = '';
+      items.forEach(r => {
+        const card = document.createElement('div');
+        card.className = 'card p-4';
+        card.innerHTML = `
+          <div class="flex items-start justify-between">
+            <div>
+              <div class="text-sm text-gray-500">${new Date(r.created_at).toLocaleString()}</div>
+              <div class="mt-1 font-semibold text-gray-800">${r.level} Sensitivity</div>
+              <div class="text-sm text-gray-600">Method: ${r.method}, Score: ${r.score ?? '-'} / ${r.total ?? '-'}</div>
+              <div class="text-sm text-gray-600 mt-1">${r.description || ''}</div>
+            </div>
+            ${r.image_filename ? `<img src="/uploads/${r.image_filename}" class="h-16 w-16 object-cover rounded" />` : ''}
+          </div>`;
+        el.appendChild(card);
+      });
+    }
+    async function applyFilters() {
+      const all = await loadAllResults();
+      const method = document.getElementById('method').value;
+      const q = document.getElementById('search').value.toLowerCase();
+      const filtered = all.filter(r => {
+        const methodOk = !method || r.method === method;
+        const text = `${r.level} ${r.description}`.toLowerCase();
+        const qOk = !q || text.includes(q);
+        return methodOk && qOk;
+      });
+      render(filtered);
+    }
+    document.getElementById('refresh').addEventListener('click', applyFilters);
+    document.getElementById('method').addEventListener('change', applyFilters);
+    document.getElementById('search').addEventListener('input', applyFilters);
+    applyFilters();
+  </script>
+</body>
+</html>

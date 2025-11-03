@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edwin Kriti Derma Solutions | Skin Sensitivity Test</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
+    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        body {
+            font-family: 'Poppins', sans-serif;
+            min-height: 100vh;
+        }
+        .fade-enter-active, .fade-leave-active {
+            transition: opacity 0.3s ease;
+        }
+        .fade-enter-from, .fade-leave-to {
+            opacity: 0;
+        }
+        .slide-up {
+            animation: slideUp 0.5s ease-out;
+        }
+        @keyframes slideUp {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            transition: all 0.3s ease;
+        }
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 15px -3px rgba(99, 102, 241, 0.3);
+        }
+    </style>
+</head>
+<body class="antialiased text-gray-800 dark-ui">
+    <div id="transitionOverlay" class="transition-overlay"></div>
+    <div x-data="app()" x-init="init()" class="min-h-screen flex flex-col">
+        <!-- Header -->
+        <header class="bg-white shadow-sm py-4">
+            <div class="container mx-auto px-4">
+                <nav class="flex items-center justify-between">
+                    <a href="/" class="flex items-center gap-3 group">
+                        <img src="{{ url_for('static', filename='images/logo.svg') }}" alt="Logo" class="h-9 w-9" />
+                        <span class="text-xl sm:text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-500 to-purple-600">Edwin Kriti Derma Solutions</span>
+                    </a>
+                    <ul class="flex items-center gap-6 text-sm font-medium text-gray-600">
+                        <li><a class="hover:text-indigo-600" href="/">Home</a></li>
+                        <li><a class="hover:text-indigo-600" href="/about">About</a></li>
+                        <li><a class="hover:text-indigo-600" href="/results">Results</a></li>
+                        {% if user %}
+                            <li><a class="hover:text-indigo-600" href="/profile">Profile</a></li>
+                            <li><a class="hover:text-indigo-600" href="/logout">Logout</a></li>
+                        {% else %}
+                            <li><a class="hover:text-indigo-600" href="/login">Login</a></li>
+                            <li><a class="hover:text-indigo-600" href="/register">Register</a></li>
+                        {% endif %}
+                        
+                    </ul>
+                </nav>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="flex-grow py-12">
+            <div class="container mx-auto px-4">
+                <!-- Welcome Card -->
+                <div x-show="!testStarted && !testCompleted && !uploadStarted" 
+                     class="max-w-3xl mx-auto bg-white rounded-xl shadow-lg overflow-hidden slide-up">
+                    <div class="p-8">
+                        <div class="text-center mb-8">
+                            <h2 class="text-3xl font-bold text-gray-800 mb-3">Welcome to Edwin Kriti Derma Solutions</h2>
+                            <p class="text-gray-600">
+                                Take our quick assessment or analyze a photo to understand your skin's sensitivity level and get personalized recommendations.
+                            </p>
+                        </div>
+                        <div class="flex flex-col sm:flex-row gap-4 justify-center">
+                            <button @click="startTest()" 
+                                    class="btn-primary text-white font-medium py-3 px-8 rounded-lg text-lg">
+                                Start Questionnaire
+                            </button>
+                            <button @click="startUpload()" 
+                                    class="bg-white text-indigo-600 border border-indigo-300 hover:bg-indigo-50 font-medium py-3 px-8 rounded-lg text-lg">
+                                Analyze Photo
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Test Section -->
+                <div x-show="testStarted && !testCompleted" 
+                     x-transition:enter="transition ease-out duration-300"
+                     x-transition:enter-start="opacity-0 transform scale-95"
+                     x-transition:enter-end="opacity-100 transform scale-100"
+                     class="max-w-3xl mx-auto bg-white rounded-xl shadow-lg overflow-hidden">
+                    <div class="p-8">
+                        <!-- Progress Bar -->
+                        <div class="mb-8">
+                            <div class="flex justify-between mb-2">
+                                <span class="text-sm font-medium text-indigo-700">
+                                    Question <span x-text="currentQuestion + 1"></span> of <span x-text="questions.length"></span>
+                                </span>
+                                <span class="text-sm font-medium text-gray-500" x-text="Math.round(((currentQuestion + 1) / questions.length) * 100) + '%' "></span>
+                            </div>
+                            <div class="w-full bg-gray-200 rounded-full h-2.5">
+                                <div class="bg-indigo-600 h-2.5 rounded-full" 
+                                     :style="'width: ' + ((currentQuestion + 1) / questions.length * 100) + '%' "></div>
+                            </div>
+                        </div>
+
+                        <!-- Question -->
+                        <div class="mb-8">
+                            <h3 class="text-xl font-medium text-gray-800 mb-6" x-text="questions[currentQuestion]"></h3>
+                            <div class="space-y-4">
+                                <button @click="answerQuestion('yes')" 
+                                        class="w-full text-left p-4 border border-gray-200 rounded-lg hover:bg-indigo-50 hover:border-indigo-300 transition-colors">
+                                    Yes
+                                </button>
+                                <button @click="answerQuestion('no')" 
+                                        class="w-full text-left p-4 border border-gray-200 rounded-lg hover:bg-indigo-50 hover:border-indigo-300 transition-colors">
+                                    No
+                                </button>
+                                <button @click="answerQuestion('sometimes')" 
+                                        class="w-full text-left p-4 border border-gray-200 rounded-lg hover:bg-indigo-50 hover:border-indigo-300 transition-colors">
+                                    Sometimes
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Image Upload Section -->
+                <div x-show="uploadStarted && !testCompleted"
+                     x-transition:enter="transition ease-out duration-300"
+                     x-transition:enter-start="opacity-0 transform scale-95"
+                     x-transition:enter-end="opacity-100 transform scale-100"
+                     class="max-w-3xl mx-auto bg-white rounded-xl shadow-lg overflow-hidden">
+                    <div class="p-8 space-y-6">
+                        <h3 class="text-xl font-semibold text-gray-800">Analyze a Face Photo</h3>
+                        <p class="text-gray-600 text-sm">Upload a clear, well-lit photo of your face. We will compute simple visual metrics to estimate sensitivity. This is not medical advice.</p>
+
+                        <div class="flex items-center gap-4">
+                            <input type="file" accept="image/*" @change="handleFileChange($event)" class="block w-full text-sm text-gray-700 border border-gray-300 rounded-lg cursor-pointer focus:outline-none" />
+                            <button @click="submitImage()" :disabled="!uploadFile || uploading"
+                                    class="btn-primary text-white font-medium py-2 px-5 rounded-lg disabled:opacity-60">
+                                <span x-show="!uploading">Analyze</span>
+                                <span x-show="uploading" class="inline-flex items-center gap-2">
+                                    <span class="loading-spinner"></span> Processing
+                                </span>
+                            </button>
+                        </div>
+
+                        <template x-if="uploadPreview">
+                            <div class="mt-4">
+                                <img :src="uploadPreview" alt="Preview" class="max-h-64 rounded-lg border" />
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- Results Section -->
+                <div x-show="testCompleted" 
+                     x-transition:enter="transition ease-out duration-500"
+                     x-transition:enter-start="opacity-0 transform scale-95"
+                     x-transition:enter-end="opacity-100 transform scale-100"
+                     class="max-w-3xl mx-auto bg-white rounded-xl shadow-lg overflow-hidden">
+                    <div class="p-8">
+                        <div class="text-center mb-8">
+                            <div class="w-24 h-24 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                            </div>
+                            <h2 class="text-2xl font-bold text-gray-800 mb-2">Your Skin Sensitivity Results</h2>
+                            <div class="w-24 h-1 bg-indigo-200 rounded-full mx-auto mb-6"></div>
+                            <p class="text-gray-600 mb-8" x-text="result.description"></p>
+                            
+                            <!-- Sensitivity Level Badge -->
+                            <div class="inline-block px-6 py-2 rounded-full text-sm font-semibold mb-8"
+                                 :class="{
+                                     'bg-green-100 text-green-800': result.level === 'Low',
+                                     'bg-yellow-100 text-yellow-800': result.level === 'Mild',
+                                     'bg-orange-100 text-orange-800': result.level === 'Moderate',
+                                     'bg-red-100 text-red-800': result.level === 'High'
+                                 }">
+                                <span x-text="result.level + ' Sensitivity'"></span>
+                            </div>
+                            
+                            <!-- Score -->
+                            <div class="w-full max-w-xs mx-auto bg-gray-100 rounded-full h-4 mb-8">
+                                <div class="h-4 rounded-full" 
+                                     :class="{
+                                         'bg-green-500': result.level === 'Low',
+                                         'bg-yellow-500': result.level === 'Mild',
+                                         'bg-orange-500': result.level === 'Moderate',
+                                         'bg-red-500': result.level === 'High'
+                                     }"
+                                     :style="'width: ' + (result.score / result.total * 100) + '%' "></div>
+                            </div>
+                            <p class="text-gray-600 mb-8">
+                                You answered <span class="font-semibold text-indigo-600" x-text="result.score + ' out of ' + result.total + ' questions' "></span> 
+                                indicating sensitivity.
+                            </p>
+                            
+                            <template x-if="result.image">
+                                <div class="mb-8">
+                                    <img :src="'/uploads/' + result.image" alt="Analyzed image" class="mx-auto max-h-64 rounded-lg border" />
+                                </div>
+                            </template>
+                            
+                            <!-- Recommendations -->
+                            <div class="bg-indigo-50 p-6 rounded-lg text-left">
+                                <h3 class="font-semibold text-lg text-indigo-800 mb-3">Recommended Next Steps</h3>
+                                <ul class="space-y-2 text-gray-700">
+                                    <template x-if="result.level === 'Low'">
+                                        <li class="flex items-start">
+                                            <svg class="h-5 w-5 text-green-500 mr-2 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                                            </svg>
+                                            <span>Your skin is resilient. You can try a variety of products but always patch test first.</span>
+                                        </li>
+                                    </template>
+                                    <template x-if="result.level === 'Mild' || result.level === 'Moderate' || result.level === 'High'">
+                                        <li class="flex items-start">
+                                            <svg class="h-5 w-5 text-indigo-500 mr-2 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                                            </svg>
+                                            <span>Use fragrance-free and hypoallergenic products specifically designed for sensitive skin.</span>
+                                        </li>
+                                    </template>
+                                    <template x-if="result.level === 'Moderate' || result.level === 'High'">
+                                        <li class="flex items-start">
+                                            <svg class="h-5 w-5 text-indigo-500 mr-2 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                                            </svg>
+                                            <span>Introduce new products one at a time and patch test before full application.</span>
+                                        </li>
+                                    </template>
+                                    <template x-if="result.level === 'High'">
+                                        <li class="flex items-start">
+                                            <svg class="h-5 w-5 text-indigo-500 mr-2 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                                            </svg>
+                                            <span>Consider consulting with a dermatologist for personalized skincare recommendations.</span>
+                                        </li>
+                                    </template>
+                                </ul>
+                            </div>
+                            
+                            <!-- Restart Button -->
+                            <div class="mt-10">
+                                <button @click="restartTest()" 
+                                        class="btn-primary text-white font-medium py-3 px-8 rounded-lg text-lg">
+                                    Take Test Again
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="bg-white border-t border-gray-200 py-6">
+            <div class="container mx-auto px-4 text-center text-gray-500 text-sm">
+                <p>&copy; <span x-text="new Date().getFullYear()"></span> Edwin Kriti Derma Solutions. For educational purposes only.</p>
+                <p class="mt-1">This tool is not a substitute for professional medical advice.</p>
+            </div>
+        </footer>
+    </div>
+</body>
+</html>
