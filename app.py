@@ -13,12 +13,21 @@ CORS(app)
 
 # App/config
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+# Local upload folder (used for local development). In production on Vercel we
+# use Blob Storage instead; the code will prefer Vercel blobs when BLOB_STORE_TOKEN
+# is set. This keeps Pylance and local runs happy.
+UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
 ALLOWED_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp'}
 app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-me')
 
 # Vercel Blob Storage configuration
 BLOB_STORE_TOKEN = os.environ.get('BLOB_STORE_TOKEN')
-VERCEL_BLOB_API = "https://blob.vercel-storage.com"
+# Public base URL for blobs (you can set BLOB_STORE_BASE_URL in Vercel env vars
+# to the store public URL). If not set we fall back to the default Vercel blob API
+# host used by the app.
+VERCEL_BLOB_API = os.environ.get('BLOB_STORE_BASE_URL', "https://blob.vercel-storage.com")
 
 # MongoDB configuration
 MONGO_URI = os.environ.get('MONGODB_URI', 'mongodb://localhost:27017/skin_sensitivity')
@@ -216,6 +225,32 @@ def analyze_image():
     db.results.insert_one(result)
 
     return jsonify({'score': score, 'total': total, 'level': level, 'description': description, 'metrics': metrics, 'image': filename})
+
+
+# Debug-only endpoint: analyze image in-memory and return results without
+# attempting to upload to Blob Storage or persist to the database. This is
+# useful for local testing and diagnosing image-analysis issues independently
+# from storage. Keep available in all environments but it intentionally
+# skips any external integrations.
+@app.route('/api/debug_analyze_image', methods=['POST'])
+def debug_analyze_image():
+    if 'image' not in request.files:
+        return jsonify({'error': 'No image file provided under field "image"'}), 400
+    file = request.files['image']
+    name = request.form.get('name', 'Anonymous')
+    if file.filename == '':
+        return jsonify({'error': 'No selected file'}), 400
+    if not allowed_file(file.filename):
+        return jsonify({'error': 'Unsupported file type'}), 400
+
+    try:
+        score, total, level, description, metrics = analyze_image_file(file)
+    except Exception as e:
+        app.logger.error(f'Debug analysis error: {str(e)}')
+        return jsonify({'error': 'Failed to analyze image', 'details': str(e)}), 500
+
+    # Return result (no DB writes, no uploads)
+    return jsonify({'score': score, 'total': total, 'level': level, 'description': description, 'metrics': metrics})
 
 @app.route('/api/results')
 def list_results():
